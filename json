@@ -27,11 +27,19 @@ def is_numeric(value, **kwargs):
     return value[1:].isdigit()
   return value.isdigit()
 
-def to_int(value, empty_value=None):
+def to_int(value, empty_value=None, fail_soft=False):
   "Parse a string as an integer, allowing for empty values"
   if value:
     return int(value)
   return empty_value
+
+def convert_maybe(func, value):
+  "Return func(value) or None if that raises a ValueError"
+  try:
+    return func(value)
+  except ValueError as err:
+    logger.warning("%s(%r) failed with error %s", func, value, err)
+    return None
 
 def parse_slice(key):
   """
@@ -56,7 +64,7 @@ def parse_slice(key):
   stop = to_int(stop_s, empty_value=None)
   return start, stop
 
-def lookup_simple(data, key):
+def lookup_simple(data, key, conv=None):
   """
   Obtain the thing referred to by key in data.
   """
@@ -85,15 +93,26 @@ def lookup_simple(data, key):
   if error:
     logger.warning(*error)
     logger.warning("Failure getting attribute %r of %s %r", key, dtype, data)
+
+  if conv in ("i", "int"):
+    value = convert_maybe(int, value)
+  elif conv in ("f", "float"):
+    value = convert_maybe(float, value)
+  elif conv in ("r", "repr"):
+    value = repr(value)
+  elif conv is not None:
+    logger.warning("Invalid conversion sequence %r; ignoring", conv)
   return value
 
 def lookup_key(data, query):
   "Get a specific thing from within the data"
   curr_data = data
-  key, rest = query, ""
+  key, rest, conv = query, "", None
   if "/" in query:
     key, rest = query.split("/", 1)
-  result_data = lookup_simple(curr_data, key)
+  elif "!" in query:
+    key, conv = query.split("!", 1)
+  result_data = lookup_simple(curr_data, key, conv)
   logger.debug("lookup(%r, %r) -> %r", curr_data, key, result_data)
   curr_data = result_data
   if rest:
@@ -124,16 +143,32 @@ def main():
   ap = argparse.ArgumentParser(epilog="""
 The -l,--lookup option allows for XPath-style access to part of the data
 based on a pattern. The components are separated by forward slashes "/".
+It also allows for simple numeric conversions using "!".
+
+Syntax:
+  PATTERN := TERM [ "/" TERM ]* [ "!" CONV ]
+  TERM := any sequence of characters other than "/" and "!"
+  CONV := one of "i" "int" "f" "float" "r" "repr"
+
+If TERM is a number and the JSON value is a list or string, then interpret
+TERM as an array offset.
+
+If CONV is "i" or "int", return either int(result) or None on failure
+If CONV is "f" or "float", return either float(result) or None on failure
+If CONV is "r" or "repr", then return repr(result)
 
   %(prog)s -l 0 -> json[0]
   %(prog)s -l 'data/entries/0/value' -> json["data"]["entries"][0]["value"]
+  %(prog)s -l 'data/size!int' -> int(json["data"]["size"])
 """, formatter_class=argparse.RawTextHelpFormatter)
   ap.add_argument("path", type=FileType, nargs="*", default=[sys.stdin],
       help="path(s) to read (default: stdin)")
   ag = ap.add_argument_group("querying")
-  ag.add_argument("-l", "--lookup", metavar="PATTERN",
+  ag.add_argument("-l", "--lookup", action="append", metavar="PATTERN",
       help="access a specific key (see below)")
   ag = ap.add_argument_group("formatting")
+  ag.add_argument("-S", "--lookup-sep", metavar="S",
+      help="(with -l,--lookup) join lookups by %(metavar)s")
   mg = ag.add_mutually_exclusive_group()
   mg.add_argument("-e", "--escape", action="store_true",
       help="escape the result for use in JSON.parse()")
@@ -155,8 +190,7 @@ based on a pattern. The components are separated by forward slashes "/".
   if args.verbose:
     logger.setLevel(logging.DEBUG)
 
-  failure = False   # Set to True if there was a JSON decode failure
-
+  failure = False
   for fobj in args.path:
     text = fobj.read()
     logger.debug("Formatting %s (%d characters)", fobj.name, len(text))
@@ -170,7 +204,13 @@ based on a pattern. The components are separated by forward slashes "/".
       continue
 
     if args.lookup:
-      data = lookup_key(data, args.lookup)
+      data_temp = []
+      for lookup in args.lookup:
+        data_temp.append(lookup_key(data, lookup))
+      if args.lookup_sep is not None:
+        data_temp = args.lookup_sep.join(str(item) for item in data_temp)
+      data = data_temp
+
     if args.print_value:
       result = data
     else:

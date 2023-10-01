@@ -14,7 +14,8 @@ Key features include:
 json
   [-h]
   [-l,--lookup PATTERN]
-  [-e,--escape | -p,--print]
+  [-S,--lookup-sep S]
+  [-e,--escape | -p,--print-value]
   [-1,--oneline | -i,--indent N]
   [-s,--sort-keys]
   [-w,--width N]
@@ -25,8 +26,9 @@ json
 
  * `-h` - print the help message and exit
  * `-l PATTERN` or `--lookup PATTERN` - extract data from the json (see <strong>Value Lookup</strong> below)
+ * `-S S` or `--lookup-sep S` - Join multiple `--lookup` values into a single string
  * `-e` or `--escape` - escape the output for later JSON parsing
- * `-p` or `--print` - print the output with no escaping
+ * `-p` or `--print-value` - print the output with no escaping
  * `-1` or `--oneline` - output on a single line without indentation
  * `-i N` or `--indent N` - indent output with this many spaces (default: 2)
  * `-s` or `--sort-keys` - sort JSON keys
@@ -36,14 +38,14 @@ json
  * `[path [path ...]]` - file(s) to process; defaults to stdin if omitted
 
 The following argument combinations are mutually-exclusive:
- * `-e` or `--escape` with `-p` or `--print`
+ * `-e` or `--escape` with `-p` or `--print-value`
  * `-1` or `--oneline` with `-i N` or `--indent N`
 
 The following arguments apply only to error messages:
  * `-w N` or `--width N`
  * `-C` or `--no-color`
 
-The following arguments are ignored if `-p` or `--print` are given:
+The following arguments are ignored if `-p` or `--print-value` are given:
  * `-1` or `--oneline`
  * `-i N` or `--indent N`
  * `-s` or `--sort-keys`
@@ -62,18 +64,24 @@ This tool is intelligent enough to interpret numeric substrings as indexes when 
 Value extraction logic is roughly as follows:
 * If the data is `String` or `Array`:
   * If the substring is numeric, obtain the element at that index.
-    * If the index is negative, then get that index relative to the end of the string or array.
+    * Negative indexes are interpreted as relative to the end of the `String` or `Array`.
   * If the substring is a slice (`<start>:<stop>`), obtain either the substring or sub-array between those two indexes.
     * The slice `<start>:` is interpreted as "all elements at or after index `<start>`". The index can be negative.
     * The slice `:<stop>` is interpreted as "all elements before `<stop>`". The index can be negative.
     * The slice `:` resolves to the entire sequence and is effectively a no-op.
   * Otherwise, issue a warning and return the data as-is.
 * If the data is an `Object`:
-  * If the data contains the substring as a key, return that key's value.
+  * If the data contains the substring as a key, obtain that key's value.
   * Otherwise, issue a warning and return the data as-is.
 * If the data is an `Integer` or `Boolean`, issue a warning and return the data as-is.
+* If the final substring contains `"!"`, then format the obtained value depending on the characters to the right of the `"!"`:
+  * `!i` or `!int` convert the obtained value to an integer. `None` is returned if this fails.
+  * `!f` or `!float` convert the obtained vlaue to a float. `None` is returned if this fails.
+  * `!r` or `!repr` replace the obtained value with `repr(value)`.
 
 A substring is considered numeric if it contains only digits between `0` and `9`, optionally with a leading hyphen `-`.
+
+If more than one `-l,--lookup PATTERN` argument is given, then the output is an array containing each lookup result. However, if `-S,--lookup-sep` is specified, then those results are joined into a single string using the separator string.
 
 ### Error Behavior
 
