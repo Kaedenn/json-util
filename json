@@ -209,6 +209,8 @@ If CONV is "r" or "repr", then return repr(result)
         data_temp.append(lookup_key(data, lookup))
       if args.lookup_sep is not None:
         data_temp = args.lookup_sep.join(str(item) for item in data_temp)
+      if len(args.lookup) == 1:
+        data_temp = data_temp[0]
       data = data_temp
 
     if args.print_value:
